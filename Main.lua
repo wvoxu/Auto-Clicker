@@ -45,6 +45,14 @@ local function safeloadstring(url)
     return nil
 end
 
+-- If this script was already run, shut the old copy down first. Otherwise the old window, key
+-- listener and click loop keep running in the background next to the new ones.
+local sharedEnv = (getgenv and getgenv()) or _G
+if sharedEnv.__WvoxuAutoClickerCleanup then
+    pcall(sharedEnv.__WvoxuAutoClickerCleanup)
+    sharedEnv.__WvoxuAutoClickerCleanup = nil
+end
+
 local UILibrary = safeloadstring("https://raw.githubusercontent.com/SugaBlaz/UI-Library/refs/heads/main/Orbital%20UI.lua")
 
 -- SERVICES --
@@ -64,6 +72,8 @@ local mouseButton = 0                     -- 0 = left, 1 = right, 2 = middle
 local lockedPos = Vector2.new(0, 0)       -- where the cursor was when you started; clicks land here
 local lastKeyChange = 0
 local statusLabel
+local alive = true
+local keyConn, tipConn
 
 local MOUSE_BUTTONS = { Left = 0, Right = 1, Middle = 2 }
 
@@ -78,6 +88,14 @@ local ui = UILibrary.Main.new({
     NotifcationSound = "", -- silent notifications
 })
 ui:CreateUI()
+
+sharedEnv.__WvoxuAutoClickerCleanup = function()
+    alive = false
+    autoClicking = false
+    if keyConn then keyConn:Disconnect() end
+    if tipConn then tipConn:Disconnect() end
+    pcall(function() ui.ScreenGui:Destroy() end)
+end
 
 -- Make the ON/OFF text easy to read (Ghost's grey-on-grey OFF was hard to see)
 ui.Colors.ToggleColorOFF = Color3.fromRGB(255, 95, 95)
@@ -115,6 +133,17 @@ local function notify(title, text)
     end)
 end
 
+-- Is the cursor over this window? Tracked with the elements' own hover events (hooked up at the
+-- bottom of the script). Used so the clicker never clicks the window's own buttons.
+local uiHover = {}
+local function overUI()
+    if not (ui.ScreenGui.Enabled and ui.UIWrapper.Visible) then
+        table.clear(uiHover) -- window hidden: drop any stale state
+        return false
+    end
+    return next(uiHover) ~= nil
+end
+
 local function fmtPos(v)
     return string.format("%d, %d", v.X, v.Y)
 end
@@ -127,6 +156,11 @@ end
 
 local function startClicking()
     if autoClicking then return end
+    if not followCursor and overUI() then
+        -- the saved spot would be on the window itself, so every click would hit its buttons
+        notify("Can't start yet", "Your cursor is over this window. Move the window or your cursor.")
+        return
+    end
     lockedPos = UserInputService:GetMouseLocation() -- remember where the mouse is right now
     clickCount = 0
     autoClicking = true
@@ -149,22 +183,26 @@ end
 -- Only sends clicks at the chosen position. It never touches MouseBehavior,
 -- so it can't drag the camera.
 task.spawn(function()
-    while true do
+    while alive do
         if autoClicking then
-            local pos = followCursor and UserInputService:GetMouseLocation() or lockedPos
-            VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, mouseButton, true, game, 0)
-            task.wait()
-            VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, mouseButton, false, game, 0)
-            clickCount += 1
-
-            if clickLimit > 0 and clickCount >= clickLimit then
-                stopClicking("Click limit reached (" .. clickLimit .. ")")
+            if followCursor and overUI() then
+                task.wait(0.05) -- cursor is on this window: pause instead of clicking its buttons
             else
-                local delay = clickSpeed
-                if randomDelay then
-                    delay = clickSpeed * (0.75 + math.random() * 0.5)
+                local pos = followCursor and UserInputService:GetMouseLocation() or lockedPos
+                VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, mouseButton, true, game, 0)
+                task.wait()
+                VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, mouseButton, false, game, 0)
+                clickCount += 1
+
+                if clickLimit > 0 and clickCount >= clickLimit then
+                    stopClicking("Click limit reached (" .. clickLimit .. ")")
+                else
+                    local delay = clickSpeed
+                    if randomDelay then
+                        delay = clickSpeed * (0.75 + math.random() * 0.5)
+                    end
+                    task.wait(delay)
                 end
-                task.wait(delay)
             end
         else
             task.wait(0.1)
@@ -174,7 +212,7 @@ end)
 
 -- KEYBIND HANDLING --
 -- Done here (not in the UI's Callback) so every key works, including shift/keypad keys.
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
+keyConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if input.KeyCode ~= toggleKey then return end
     if UserInputService:GetFocusedTextBox() then return end -- typing in a textbox/chat
     if os.clock() - lastKeyChange < 0.3 then return end     -- the press that just rebound the key
@@ -307,6 +345,20 @@ for _, d in ipairs(ui.ScreenGui:GetDescendants()) do
     end
 end
 
+-- Track hover over the whole window (main frame, settings panel, every element)
+do
+    local objs = { ui.UIWrapper }
+    for _, d in ipairs(ui.UIWrapper:GetDescendants()) do
+        table.insert(objs, d)
+    end
+    for _, o in ipairs(objs) do
+        if o:IsA("GuiObject") then
+            o.MouseEnter:Connect(function() uiHover[o] = true end)
+            o.MouseLeave:Connect(function() uiHover[o] = nil end)
+        end
+    end
+end
+
 -- HOVER TIPS --
 -- Hover an option for a moment to see what it does.
 local RunService = game:GetService("RunService")
@@ -376,7 +428,7 @@ local function isShown(gui)
 end
 
 local hovered, hoverSince = nil, 0
-RunService.Heartbeat:Connect(function()
+tipConn = RunService.Heartbeat:Connect(function()
     local found = nil
     if ui.ScreenGui.Enabled and ui.UIWrapper.Visible then
         for _, tip in ipairs(tips) do
