@@ -1,10 +1,44 @@
 -- Auto Clicker (by wvoxu) - locked-position autoclicker (Orbital UI)
 
+-- SAVED SETTINGS --
+-- Settings are kept in a small file in your executor's workspace folder and loaded on start.
+-- (Whether the clicker is on or off is never saved.)
+local HttpService = game:GetService("HttpService")
+local SAVE_FILE = "WvoxuAutoClicker.json"
+local saved = {}
+local canSave = (writefile and readfile and isfile) ~= nil
+if canSave and isfile(SAVE_FILE) then
+    local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(SAVE_FILE)) end)
+    if ok and type(decoded) == "table" then
+        saved = decoded
+    end
+end
+
+local function keyFromName(name, fallback)
+    if type(name) ~= "string" then return fallback end
+    local ok, key = pcall(function() return Enum.KeyCode[name] end)
+    if ok and key then return key end
+    return fallback
+end
+
+local uiKey = keyFromName(saved.uiKey, Enum.KeyCode.RightShift)
+local saveSettings = function() end -- replaced once the UI exists
+
 -- LOADING --
 local function safeloadstring(url)
     local source = game:HttpGet(url)
-    -- Make RightShift the default key for hiding/showing the window (library default is F3)
-    source = source:gsub("Enum%.KeyCode%.F3", "Enum.KeyCode.RightShift", 1)
+    -- Key for hiding/showing the window: saved key, else RightShift (library default is F3).
+    -- ChangedCallback reports rebinds back to this script so they can be saved.
+    do
+        local a, b = source:find("Default = Enum.KeyCode.F3,", 1, true)
+        if a then
+            source = source:sub(1, a - 1)
+                .. "Default = Enum.KeyCode." .. uiKey.Name .. ","
+                .. " ChangedCallback = function(k) local g = (getgenv and getgenv()) or _G;"
+                .. " if g.__WvoxuAC_SaveUiKey then g.__WvoxuAC_SaveUiKey(k) end end,"
+                .. source:sub(b + 1)
+        end
+    end
     -- Skip the logo intro (and the wait that comes with it)
     source = source:gsub("self:Intro%(%)%s*task%.wait%(1%)", "", 1)
     -- Remove the F2 "hide whole GUI" keybind so RightShift is the only UI toggle
@@ -61,14 +95,15 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 
 -- VARIABLES --
 local autoClicking = false
-local clickSpeed = 0.1
-local toggleKey = Enum.KeyCode.KeypadPlus -- change it in the UI (any key works)
-local randomDelay = false                 -- vary the delay by +-25%
-local followCursor = false                -- click wherever the cursor is instead of a fixed spot
-local notificationsOn = true
-local clickLimit = 0                      -- 0 = unlimited
+local clickSpeed = (tonumber(saved.clickSpeed) and tonumber(saved.clickSpeed) > 0) and tonumber(saved.clickSpeed) or 0.1
+local toggleKey = keyFromName(saved.key, Enum.KeyCode.KeypadPlus) -- change it in the UI (any key works)
+local randomDelay = saved.randomDelay == true            -- vary the delay by +-25%
+local followCursor = saved.followCursor == true          -- click wherever the cursor is instead of a fixed spot
+local notificationsOn = saved.notifications ~= false
+local clickLimit = math.max(0, math.floor(tonumber(saved.clickLimit) or 0)) -- 0 = unlimited
 local clickCount = 0
-local mouseButton = 0                     -- 0 = left, 1 = right, 2 = middle
+local mouseButtonName = (saved.mouseButton == "Right" or saved.mouseButton == "Middle") and saved.mouseButton or "Left"
+local mouseButton = 0                     -- 0 = left, 1 = right, 2 = middle (set from mouseButtonName below)
 local lockedPos = Vector2.new(0, 0)       -- where the cursor was when you started; clicks land here
 local lastKeyChange = 0
 local statusLabel
@@ -76,6 +111,8 @@ local alive = true
 local keyConn, tipConn
 
 local MOUSE_BUTTONS = { Left = 0, Right = 1, Middle = 2 }
+mouseButton = MOUSE_BUTTONS[mouseButtonName]
+local ready = false -- settings are only written once the UI has finished loading
 
 -- UI --
 local ui = UILibrary.Main.new({
@@ -88,6 +125,27 @@ local ui = UILibrary.Main.new({
     NotifcationSound = "", -- silent notifications
 })
 ui:CreateUI()
+
+saveSettings = function()
+    if not (canSave and ready) then return end
+    pcall(function()
+        writefile(SAVE_FILE, HttpService:JSONEncode({
+            key = toggleKey.Name,
+            uiKey = uiKey.Name,
+            clickSpeed = clickSpeed,
+            clickLimit = clickLimit,
+            mouseButton = mouseButtonName,
+            randomDelay = randomDelay,
+            followCursor = followCursor,
+            notifications = notificationsOn,
+        }))
+    end)
+end
+
+sharedEnv.__WvoxuAC_SaveUiKey = function(newKey)
+    uiKey = newKey
+    saveSettings()
+end
 
 sharedEnv.__WvoxuAutoClickerCleanup = function()
     alive = false
@@ -192,7 +250,7 @@ task.spawn(function()
                 VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, mouseButton, true, game, 0)
                 task.wait()
                 VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, mouseButton, false, game, 0)
-                clickCount += 1
+                clickCount = clickCount + 1
 
                 if clickLimit > 0 and clickCount >= clickLimit then
                     stopClicking("Click limit reached (" .. clickLimit .. ")")
@@ -241,6 +299,7 @@ ui:AddKeybind({
         toggleKey = newKey
         stopClicking()
         setStatus()
+        saveSettings()
     end,
 })
 
@@ -270,6 +329,7 @@ ui:AddTextBox({
         local speed = tonumber(text)
         if speed and speed > 0 then
             clickSpeed = speed
+            saveSettings()
         else
             warn("Invalid speed input")
         end
@@ -278,13 +338,14 @@ ui:AddTextBox({
 
 ui:AddTextBox({
     Text = "Click Limit (0 = unlimited)",
-    Default = "0",
+    Default = tostring(clickLimit),
     Placeholder = "0",
     SavingEnabled = false,
     Callback = function(text)
         local n = tonumber(text)
         if n and n >= 0 then
             clickLimit = math.floor(n)
+            saveSettings()
         else
             warn("Invalid click limit")
         end
@@ -293,39 +354,44 @@ ui:AddTextBox({
 
 local buttonDropdown = ui:AddDropdown({
     Text = "Mouse Button",
-    Default = "Left",
+    Default = mouseButtonName,
     Options = { "Left", "Right", "Middle" },
     SavingEnabled = false,
     Callback = function(option)
         mouseButton = MOUSE_BUTTONS[option] or 0
+        mouseButtonName = MOUSE_BUTTONS[option] and option or "Left"
+        saveSettings()
     end,
 })
-buttonDropdown:Set("Left") -- the library starts dropdowns on "None"; show the real default
+buttonDropdown:Set(mouseButtonName) -- the library starts dropdowns on "None"; show the real value
 
 ui:AddToggle({
     Text = "Random Delay",
-    Default = false,
+    Default = randomDelay,
     SavingEnabled = false,
     Callback = function(state)
         randomDelay = state
+        saveSettings()
     end,
 })
 
 ui:AddToggle({
     Text = "Follow Cursor",
-    Default = false,
+    Default = followCursor,
     SavingEnabled = false,
     Callback = function(state)
         followCursor = state
+        saveSettings()
     end,
 })
 
 ui:AddToggle({
     Text = "Notifications",
-    Default = true,
+    Default = notificationsOn,
     SavingEnabled = false,
     Callback = function(state)
         notificationsOn = state
+        saveSettings()
     end,
 })
 
@@ -463,3 +529,6 @@ tipConn = RunService.Heartbeat:Connect(function()
         tipLabel.Position = UDim2.fromOffset(x, y)
     end
 end)
+
+-- everything is built: from now on, changes get saved
+ready = true
