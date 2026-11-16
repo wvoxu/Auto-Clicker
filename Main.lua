@@ -5,7 +5,7 @@
 -- (Whether the clicker is on or off is never saved.)
 local HttpService = game:GetService("HttpService")
 local SAVE_FILE = "WvoxuAutoClicker.json"
-local saved = {}
+local saved = HttpService:JSONDecode("{}") -- (decoded this way so editors treat it as a flexible table)
 local canSave = (writefile and readfile and isfile) ~= nil
 if canSave and isfile(SAVE_FILE) then
     local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(SAVE_FILE)) end)
