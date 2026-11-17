@@ -2,7 +2,6 @@
 -- Hit your key to start clicking at your cursor, hit it again to stop.
 -- UI library credits are in its header.
 
--- UI library link (main.lua in the repo). Change it if the repo name is different.
 local LIB_URL = "https://raw.githubusercontent.com/wvoxu/UI-Library/main/main.lua"
 
 ----------------------------------------------------------------------
