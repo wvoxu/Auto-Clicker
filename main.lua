@@ -1,15 +1,14 @@
 -- Auto Clicker (by wvoxu) - locked-position autoclicker, UI Library
--- Press your key to start clicking where your cursor is. Press it again to stop.
--- Everything is set in the window. UI Library credits are in the library's header comment.
+-- Hit your key to start clicking at your cursor, hit it again to stop.
+-- UI library credits are in its header.
 
--- UI LIBRARY: loaded from this link (the "main.lua" of your UI Library repo). Change it if the repo is named differently.
+-- UI library link (main.lua in the repo). Change it if the repo name is different.
 local LIB_URL = "https://raw.githubusercontent.com/wvoxu/UI-Library/main/main.lua"
 
 ----------------------------------------------------------------------
 -- SAVED SETTINGS
 ----------------------------------------------------------------------
--- Settings are kept in a small file in your executor's workspace folder and loaded on start.
--- (Whether the clicker is on or off is never saved. The theme and menu key are saved by the UI itself.)
+-- Saving is handled by the UI (Settings > Configs). On/off is never saved.
 local HttpService = game:GetService("HttpService")
 local SAVE_FILE = "WvoxuAutoClicker.json"
 local saved = HttpService:JSONDecode("{}") -- (decoded this way so editors treat it as a flexible table)
@@ -38,7 +37,7 @@ if sharedEnv.__WvoxuAutoClickerCleanup then
 end
 
 ----------------------------------------------------------------------
--- LOAD THE UI LIBRARY (built in)
+-- LOAD THE UI LIBRARY
 ----------------------------------------------------------------------
 local UILib
 do
@@ -100,8 +99,7 @@ local Window = UILib:Window({
     KeepPrevious = true,
 })
 
--- Settings are saved by the UI itself now (Settings > Configs: Autosave / Autoload).
--- The old settings file is only read once, to fill in the first "Default" config.
+-- Saving is handled by the UI. The old json file is only read once to fill the first Default config.
 saveSettings = function() end
 
 sharedEnv.__WvoxuAutoClickerCleanup = function()
@@ -116,7 +114,7 @@ local function notify(title, text)
     Window:Notify({ Title = title, Text = text, Duration = 2 })
 end
 
--- Is the cursor over this window? The clicker never clicks the window's own buttons.
+-- is the cursor over the window? (so it never clicks its own buttons)
 local function overUI()
     if not Window:IsVisible() or not Window.Frame then return false end
     local p = UserInputService:GetMouseLocation() - GuiService:GetGuiInset()
@@ -157,13 +155,13 @@ local function stopClicking(reason)
     notify("Auto Clicker off", reason or (clickCount .. " clicks sent"))
 end
 
-local clickGroup = Tab:Group({ Name = "Clicking", Description = "Your settings are saved automatically." })
+local clickGroup = Tab:Group("Clicking")
 
 local keyEl
 keyEl = clickGroup:Keybind({
     Name = "Auto Clicker Key",
     Flag = "key",
-    Description = "Press it to start or stop. Click the box to change it.",
+    Description = "Start/stop key. Click the box to rebind.",
     Default = toggleKey,
     Changed = function(newKey)
         lastKeyChange = os.clock()
@@ -177,7 +175,7 @@ keyEl = clickGroup:Keybind({
 clickGroup:Input({
     Name = "Click Delay (s)",
     Flag = "delay",
-    Description = "Seconds between clicks. 0.1 is about 10 clicks a second.",
+    Description = "Seconds between clicks (0.1 = 10 a second).",
     Default = tostring(clickSpeed),
     Placeholder = "0.1",
     Numeric = true,
@@ -193,7 +191,7 @@ clickGroup:Input({
 clickGroup:Input({
     Name = "Click Limit",
     Flag = "limit",
-    Description = "Stops after this many clicks. 0 means it never stops.",
+    Description = "Stops after this many clicks. 0 = never.",
     Default = tostring(clickLimit),
     Placeholder = "0",
     Numeric = true,
@@ -209,7 +207,7 @@ clickGroup:Input({
 clickGroup:Dropdown({
     Name = "Mouse Button",
     Flag = "button",
-    Description = "Which mouse button it clicks with.",
+    Description = "Which button to click with.",
     Options = { "Left", "Right", "Middle" },
     Default = mouseButtonName,
     Callback = function(option)
@@ -226,7 +224,7 @@ local optionGroup = Tab:Group("Options")
 optionGroup:Toggle({
     Name = "Random Delay",
     Flag = "random",
-    Description = "Changes the delay a little each click so the timing isn't even.",
+    Description = "Varies the delay a bit each click.",
     Default = randomDelay,
     Callback = function(state)
         randomDelay = state
@@ -237,7 +235,7 @@ optionGroup:Toggle({
 optionGroup:Toggle({
     Name = "Follow Cursor",
     Flag = "follow",
-    Description = "Clicks wherever your cursor is, instead of where you started.",
+    Description = "Clicks at your cursor instead of the spot you started at.",
     Default = followCursor,
     Callback = function(state)
         followCursor = state
@@ -248,7 +246,7 @@ optionGroup:Toggle({
 optionGroup:Toggle({
     Name = "Notifications",
     Flag = "notifications",
-    Description = "Pop-ups for on/off and the click limit.",
+    Description = "Pop-ups when it starts and stops.",
     Default = notificationsOn,
     Callback = function(state)
         notificationsOn = state
@@ -259,7 +257,7 @@ optionGroup:Toggle({
 ----------------------------------------------------------------------
 -- AUTOCLICK LOOP
 ----------------------------------------------------------------------
--- Only sends clicks at the chosen position. It never touches MouseBehavior, so it can't drag the camera.
+-- just sends clicks at the spot, never touches MouseBehavior so the camera won't drag
 task.spawn(function()
     while alive do
         if autoClicking then
@@ -297,7 +295,7 @@ end)
 ----------------------------------------------------------------------
 -- KEY HANDLING
 ----------------------------------------------------------------------
--- Done here (not in the UI's callback) so every key works, including shift/keypad keys.
+-- handled here instead of the UI callback so any key works (shift, keypad etc)
 keyConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if keyEl and keyEl:Get() then toggleKey = keyEl:Get() end
     if input.KeyCode ~= toggleKey then return end
@@ -315,5 +313,4 @@ keyConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
--- everything is built: from now on, changes get saved
 ready = true
